@@ -39,6 +39,13 @@ ENV/
 .env.*.local
 !.env.example
 
+# Debug / temp files
+token.txt
+*.token.txt
+
+# Sisyphus session files
+.sisyphus/
+
 # Database
 *.db
 *.sqlite
@@ -63,6 +70,12 @@ celerybeat-schedule
 # OS
 .DS_Store
 Thumbs.db
+
+# Uploaded files (medical images, reports)
+uploads/
+
+# Android build cache
+android/.gradle/
 
 # Node (if frontend added later)
 node_modules/
