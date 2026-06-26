@@ -1,0 +1,40 @@
+# 医智云·AI医疗协作平台 本地开发环境
+# 使用方式: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# 启动后: 访问 http://localhost:8000/docs 查看 API 文档
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  backend:
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python -m app.scripts.seed_knowledge &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    volumes:
+      - ./backend:/app
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  celery-worker:
+    volumes:
+      - ./backend:/app
+
+  celery-beat:
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/src:/app/src
+    ports:
+      - "127.0.0.1:5173:5173"

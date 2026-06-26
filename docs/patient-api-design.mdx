@@ -1,0 +1,238 @@
+---
+title: 患者端后端 API 完整设计方案
+lang: zh-CN
+---
+
+# 患者端后端 API 完整设计方案
+
+> 最后更新: 2026-06-06
+
+## 1. 概述
+
+本文档描述患者端后端 API 的完整设计方案，包括数据库模型、API 端点、认证授权、业务逻辑、安全边界、性能优化及测试策略。
+
+**目标**：为患者提供健康档案管理、病例查看、随访计划与任务管理的能力。
+
+---
+
+## 2. 数据库模型设计
+
+### 2.1 健康档案表 (health_profiles)
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| user_id | UUID | PRIMARY KEY, FOREIGN KEY (users.id) ON DELETE CASCADE | 用户ID，一对一 |
+| date_of_birth | DATE | NULL | 出生日期 |
+| gender | gender_enum | NULL | 性别枚举：male, female, other, prefer_not_to_say |
+| height | NUMERIC(5,2) | NULL, CHECK (height BETWEEN 30 AND 300) | 身高(cm) |
+| weight | NUMERIC(5,2) | NULL, CHECK (weight BETWEEN 2 AND 500) | 体重(kg) |
+| allergies | JSONB | NOT NULL, DEFAULT '[]' | 过敏原数组 |
+| chronic_diseases | JSONB | NOT NULL, DEFAULT '[]' | 慢性病数组 |
+| medications | JSONB | NOT NULL, DEFAULT '[]' | 用药记录数组 |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 创建时间 |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 更新时间 |
+
+medications 元素 JSON Schema：
+
+```json
+{
+  "name": "string (required)",
+  "dosage": "number (required, >0)",
+  "dosage_unit": "string (enum: mg, g, ml, 片)",
+  "frequency": "string (required)",
+  "start_date": "date (required, <= today)",
+  "end_date": "date (optional, >= start_date)"
+}
+```
+
+### 2.2 随访计划表 (care_plans)
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| id | UUID | PRIMARY KEY, DEFAULT gen_random_uuid() | 计划ID |
+| patient_id | UUID | NOT NULL, FOREIGN KEY (users.id) ON DELETE CASCADE, INDEX | 患者ID |
+| title | VARCHAR(200) | NOT NULL | 计划标题 |
+| goals | JSONB | NOT NULL, DEFAULT '[]' | 目标数组 |
+| status | plan_status_enum | NOT NULL, DEFAULT 'active' | active, paused, completed, cancelled |
+| start_date | DATE | NOT NULL | 计划开始日期 |
+| end_date | DATE | NULL, CHECK (end_date >= start_date) | 计划结束日期 |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 创建时间 |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 更新时间 |
+
+索引：`(patient_id, status)`
+
+### 2.3 随访任务表 (care_tasks)
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| id | UUID | PRIMARY KEY | 任务ID |
+| plan_id | UUID | NOT NULL, FOREIGN KEY (care_plans.id) ON DELETE CASCADE, INDEX | 所属计划 |
+| description | VARCHAR(500) | NOT NULL | 任务描述 |
+| due_date | DATE | NOT NULL | 截止日期 |
+| status | task_status_enum | NOT NULL, DEFAULT 'pending' | pending, completed, skipped, expired |
+| completed_at | TIMESTAMPTZ | NULL | 完成时间 |
+| order | INTEGER | DEFAULT 0 | 排序顺序 |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 创建时间 |
+
+索引：`(plan_id, status)`, `(due_date)`
+
+**状态转换**：
+- pending → completed (患者主动完成)
+- pending → skipped (患者跳过，或计划结束时被动标记)
+- pending → expired (系统定时任务, due_date < today)
+- 终态：completed, skipped, expired 不可逆转
+
+---
+
+## 3. API 端点设计
+
+### 3.1 通用规范
+
+- **Base URL**：`/api/v1/patient`
+- **认证**：所有端点需携带 `Authorization: Bearer <token>`，角色必须为 PATIENT
+- **响应格式**：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": { ... }
+}
+```
+
+**错误码**：
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 业务参数错误 |
+| 401 | 未认证 |
+| 403 | 无权限 |
+| 404 | 资源不存在 |
+| 409 | 资源冲突 |
+| 422 | 请求体验证失败 |
+
+### 3.2 健康档案
+
+#### GET /profile
+获取当前患者的健康档案。若档案不存在，则原子地创建一份空档案并返回。
+
+#### PATCH /profile
+部分更新健康档案。标量字段直接替换，JSONB 字段全替换。
+
+#### POST /profile/allergies
+添加过敏原（原子操作）。
+
+#### DELETE /profile/allergies/{item}
+删除过敏原。
+
+### 3.3 病例列表
+
+#### GET /cases
+查询当前患者的病例列表。强制过滤 `patient_id = current_user.id`。
+
+分页：page（默认1）、size（默认20，最大100）。
+
+### 3.4 随访计划与任务
+
+#### GET /care-plans
+获取随访计划列表。默认不含任务。支持 `?include_tasks=true`。
+
+#### GET /care-plans/{id}
+获取单个计划详情，始终包含所有任务。
+
+#### GET /care-plans/{id}/tasks
+分页获取计划下的任务，支持按状态过滤。
+
+#### POST /care-plans/{planId}/tasks/{taskId}/complete
+完成任务。条件更新 + 并发控制。
+
+#### POST /care-plans/{planId}/tasks/{taskId}/skip
+跳过任务。
+
+#### PATCH /care-plans/{id}/status
+更新计划状态（取消/暂停）。
+
+### 3.5 审计日志
+所有对 health_profiles 的读写操作记录审计日志。
+
+---
+
+## 4. 业务逻辑与边界条件
+
+### 4.1 计划状态机
+
+```
+[active] <--> [paused]  (双向)
+[active] --> [completed]   (手动或到期)
+[active] --> [cancelled]
+[paused] --> [cancelled]
+[completed] 和 [cancelled] 为终态，不可逆
+```
+
+### 4.2 任务自动过期
+每日凌晨扫描因 `due_date < today` 且 `status='pending'` 的任务，标记为 `expired`。
+
+### 4.3 边界条件处理
+
+| 场景 | 行为 |
+|------|------|
+| GET /profile 并发请求 | 仅创建一条记录 |
+| JSONB 字段全替换 | 客户端承担覆盖风险 |
+| 非法性别 | 返回422 |
+| 患者无病例 | 返回空分页 |
+| 计划已结束时完成任务 | 返回400 |
+| 任务已过期 | 返回400 |
+| 并发完成同一任务 | 仅一个成功，其余409 |
+
+---
+
+## 5. 安全设计
+
+- **认证**：JWT token
+- **授权**：`require_role(PATIENT)`
+- **水平越权防护**：自动用 current_user.id 过滤
+- **敏感数据保护**：审计日志、字段白名单
+
+---
+
+## 6. 性能优化
+
+- **索引**：care_plans(patient_id, status), care_tasks(plan_id, status), care_tasks(due_date)
+- **N+1 防护**：列表默认不加载任务，用 selectinload 预加载
+- **分页**：offset/limit，深度分页可考虑 cursor
+- **GIN 索引**：allergies 用于反查
+
+---
+
+## 7. 测试策略
+
+- **单元测试**：校验函数、状态转换、Pydantic 模型
+- **集成测试**：API 全路径覆盖（含权限、并发、边界）
+- **迁移测试**：级联删除、NOT NULL 默认值
+
+---
+
+## 8. 文件结构
+
+```
+backend/app/
+├── models/patient_profile.py       # HealthProfile, CarePlan, CareTask
+├── schemas/patient.py              # Pydantic schemas
+├── api/v1/patient.py               # 路由实现
+├── services/profile_service.py     # 档案业务逻辑
+├── services/care_plan_service.py   # 随访计划业务逻辑
+├── db/migrations/versions/         # Alembic 迁移
+└── tests/
+    ├── test_api_patient.py
+    └── test_models.py
+```
+
+---
+
+## 9. 实施顺序
+
+1. 创建数据库迁移脚本
+2. 实现模型类与 Pydantic schemas
+3. 实现服务层
+4. 实现 API 路由
+5. 编写测试
+6. 注册路由
