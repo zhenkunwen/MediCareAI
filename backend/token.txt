@@ -1,0 +1,18 @@
+2026-06-05 16:57:51,915 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-05 16:57:51,936 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.hashed_password, users.full_name, users.phone, users.role, users.status, users.is_verified, users.license_number, users.hospital, users.department, users.title, users.created_at, users.updated_at, users.last_login_at, users.password_change_required 
+FROM users 
+WHERE users.email = ?
+2026-06-05 16:57:51,936 INFO sqlalchemy.engine.Engine [generated in 0.00022s] ('admin@medicareai.dev',)
+2026-06-05 16:57:51,939 INFO sqlalchemy.engine.Engine SELECT notifications.sender_id AS notifications_sender_id, notifications.id AS notifications_id, notifications.recipient_id AS notifications_recipient_id, notifications.notification_type AS notifications_notification_type, notifications.priority AS notifications_priority, notifications.subject AS notifications_subject, notifications.content AS notifications_content, notifications.action_url AS notifications_action_url, notifications.is_read AS notifications_is_read, notifications.read_at AS notifications_read_at, notifications.sender_deleted AS notifications_sender_deleted, notifications.recipient_deleted AS notifications_recipient_deleted, notifications.broadcast AS notifications_broadcast, notifications.created_at AS notifications_created_at, notifications.updated_at AS notifications_updated_at 
+FROM notifications 
+WHERE notifications.sender_id IN (?)
+2026-06-05 16:57:51,946 INFO sqlalchemy.engine.Engine [generated in 0.00628s] ('4d1cd905359b4866b73817ad0204c25f',)
+2026-06-05 16:57:51,947 INFO sqlalchemy.engine.Engine SELECT notifications.recipient_id AS notifications_recipient_id, notifications.id AS notifications_id, notifications.sender_id AS notifications_sender_id, notifications.notification_type AS notifications_notification_type, notifications.priority AS notifications_priority, notifications.subject AS notifications_subject, notifications.content AS notifications_content, notifications.action_url AS notifications_action_url, notifications.is_read AS notifications_is_read, notifications.read_at AS notifications_read_at, notifications.sender_deleted AS notifications_sender_deleted, notifications.recipient_deleted AS notifications_recipient_deleted, notifications.broadcast AS notifications_broadcast, notifications.created_at AS notifications_created_at, notifications.updated_at AS notifications_updated_at 
+FROM notifications 
+WHERE notifications.recipient_id IN (?)
+2026-06-05 16:57:51,948 INFO sqlalchemy.engine.Engine [generated in 0.00013s] ('4d1cd905359b4866b73817ad0204c25f',)
+2026-06-05 16:57:51,949 INFO sqlalchemy.engine.Engine SELECT role_switch_logs.user_id AS role_switch_logs_user_id, role_switch_logs.id AS role_switch_logs_id, role_switch_logs.from_role AS role_switch_logs_from_role, role_switch_logs.to_role AS role_switch_logs_to_role, role_switch_logs.switched_at AS role_switch_logs_switched_at, role_switch_logs.ip_address AS role_switch_logs_ip_address, role_switch_logs.user_agent AS role_switch_logs_user_agent 
+FROM role_switch_logs 
+WHERE role_switch_logs.user_id IN (?)
+2026-06-05 16:57:51,949 INFO sqlalchemy.engine.Engine [generated in 0.00012s] ('4d1cd905359b4866b73817ad0204c25f',)
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODEyNTQ2NzEsInN1YiI6IjRkMWNkOTA1LTM1OWItNDg2Ni1iNzM4LTE3YWQwMjA0YzI1ZiIsInR5cGUiOiJhY2Nlc3MiLCJwbGF0Zm9ybSI6IndlYiJ9.cSijWrZD0UpeWDdR3G15N_h0B67Bv3U4C9L0YwLV-4Q2026-06-05 16:57:51,950 INFO sqlalchemy.engine.Engine ROLLBACK
