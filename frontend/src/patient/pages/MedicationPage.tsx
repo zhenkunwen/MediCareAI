@@ -38,7 +38,8 @@ export default function MedicationPage() {
       const [t, r] = await Promise.all([getTodayMedications(), listMedications()]);
       setToday(t);
       setReminders(r);
-    } catch {
+    } catch (err) {
+      console.error('加载今日用药失败:', err);
       setToday({ items: [], taken_count: 0, pending_count: 0, total_count: 0 });
     }
     setLoading(false);
@@ -50,7 +51,7 @@ export default function MedicationPage() {
     try {
       await takeMedication(rid);
       loadToday();
-    } catch { /* ignore */ }
+    } catch (err) { console.error('取消用药提醒失败:', err); }
   };
 
   const handleAdd = async () => {
@@ -67,7 +68,7 @@ export default function MedicationPage() {
       setAddOpen(false);
       setName(''); setDosage(''); setFrequency(''); setTimes(''); setLeadMinutes(15); setRemindEnabled(true);
       loadToday();
-    } catch { /* ignore */ }
+    } catch (err) { console.error('创建用药提醒失败:', err); }
   };
 
   const handleDelete = async (id: string) => {
@@ -75,7 +76,7 @@ export default function MedicationPage() {
       await deleteMedication(id);
       setDeleting(null);
       loadToday();
-    } catch { /* ignore */ }
+    } catch (err) { console.error('删除用药提醒失败:', err); }
   };
 
   const rate = today?.total_count ? Math.round((today.taken_count / today.total_count) * 100) : 0;

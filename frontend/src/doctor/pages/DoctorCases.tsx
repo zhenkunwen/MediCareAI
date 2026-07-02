@@ -20,6 +20,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import MessageOutlinedIcon from '@mui/icons-material/MessageOutlined';
 import { listPatients } from '../../api/doctor';
 import type { PatientSummary } from '../../api/doctor';
+import { API_BASE, authHeaders } from '../../api/client';
 import { flexRowBetweenMb2 } from '../../styles/sxUtils';
 
 
@@ -164,6 +165,21 @@ export default function DoctorCases() {
     navigate(`/doctor/cases/${caseId}`);
   };
 
+  const handleMessage = async (e: React.MouseEvent, caseId: string) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`${API_BASE}/doctor/cases/${caseId}/conversation`, {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error('创建会话失败');
+      const { conversation_id } = await res.json();
+      navigate(`/doctor/messages?convId=${conversation_id}`);
+    } catch (err) {
+      console.error('[DoctorCases] 创建会话失败:', err);
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', md: 'row' } }}>
       {/* 左侧筛选栏 */}
@@ -298,7 +314,7 @@ export default function DoctorCases() {
                             size="small"
                             variant="text"
                             startIcon={<MessageOutlinedIcon fontSize="small" />}
-                            onClick={() => navigate('/doctor/messages')}
+                            onClick={(e) => handleMessage(e, p.id)}
                             sx={{
                               textTransform: 'none',
                               borderRadius: 2,

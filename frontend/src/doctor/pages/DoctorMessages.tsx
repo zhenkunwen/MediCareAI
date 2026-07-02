@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, List, ListItem, ListItemButton, ListItemAvatar, ListItemText,
   Avatar, Chip, Divider, TextField, IconButton, InputAdornment, Paper, Badge, Skeleton, Alert,
@@ -108,6 +108,7 @@ const POLL_INTERVAL = 5000;
 
 export default function DoctorMessages() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [convs, setConvs] = useState<Conversation[]>([]);
 
   const authFetch = useCallback(async (url: string, opts?: RequestInit) => {
@@ -133,6 +134,23 @@ export default function DoctorMessages() {
       const r = await authFetch(`${API_BASE}/doctor/messages/conversations`);
       const data = await r.json();
       setConvs(data.items || []);
+
+      // Auto-select conversation from URL param
+      const targetConvId = searchParams.get('convId');
+      const targetCaseId = searchParams.get('caseId');
+      if (targetConvId && data.items?.length) {
+        const target = data.items.find((c: Conversation) => c.id === targetConvId);
+        if (target) {
+          setActiveConv(target);
+          loadMessages(target.id);
+        }
+      } else if (targetCaseId && data.items?.length) {
+        const target = data.items.find((c: Conversation) => c.case_id === targetCaseId);
+        if (target) {
+          setActiveConv(target);
+          loadMessages(target.id);
+        }
+      }
     } catch (err) { console.error('[Msg] convs error:', err); }
     setLoading(false);
   };
@@ -177,11 +195,34 @@ export default function DoctorMessages() {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !activeConv || sending) return;
-    setSending(true);
+    if (!input.trim() || sending) return;
     const content = input.trim();
     setInput('');
-    // Optimistic update
+    setSending(true);
+
+    const caseId = searchParams.get('caseId');
+
+    // 从病例列表过来的新会话：创建会话 + 发消息一步完成
+    if (caseId && !activeConv) {
+      try {
+        const r = await authFetch(`${API_BASE}/doctor/cases/${caseId}/messages`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+        if (r.ok) {
+          const sent = await r.json();
+          // 导航到会话视图，替换 URL
+          navigate(`/doctor/messages?convId=${sent.conversation_id}`, { replace: true });
+          // 重新加载到新会话
+          loadConvs();
+        }
+      } catch (err) { console.error('[Msg] case send error:', err); }
+      setSending(false);
+      return;
+    }
+
+    // 已有会话：正常发送
+    if (!activeConv) { setSending(false); return; }
     const tempId = 'temp-' + Date.now();
     setMessages(prev => [...prev, { id: tempId, sender_role: 'doctor', content, message_type: 'text', created_at: new Date().toISOString(), is_read: false }]);
     try {
@@ -278,7 +319,7 @@ export default function DoctorMessages() {
 
       {/* Right panel: chat window */}
       <Paper variant="outlined" sx={{ flexGrow: 1, borderRadius: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {!activeConv ? (
+        {!activeConv && !searchParams.get('caseId') ? (
           <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Typography variant="body1" color="text.secondary">选择一个会话开始聊天</Typography>
           </Box>
@@ -286,18 +327,30 @@ export default function DoctorMessages() {
           <>
             {/* Header */}
             <Box sx={{ px: 2.5, py: 1.5, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Avatar src={activeConv.other_avatar || undefined} sx={{ bgcolor: activeConv.other_avatar ? 'transparent' : 'primary.main', width: 36, height: 36, fontSize: '0.85rem' }}>
-                {!activeConv.other_avatar && activeConv.other_name[0]}
-              </Avatar>
-              <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{activeConv.other_name}</Typography>
-                <Typography variant="caption" color="text.secondary">{activeConv.case_id ? '关联病例' : ''}</Typography>
-              </Box>
+              {activeConv ? (
+                <>
+                  <Avatar src={activeConv.other_avatar || undefined} sx={{ bgcolor: activeConv.other_avatar ? 'transparent' : 'primary.main', width: 36, height: 36, fontSize: '0.85rem' }}>
+                    {!activeConv.other_avatar && activeConv.other_name[0]}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{activeConv.other_name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{activeConv.case_id ? '关联病例' : ''}</Typography>
+                  </Box>
+                </>
+              ) : (
+                <>
+                  <Avatar sx={{ bgcolor: 'primary.main', width: 36, height: 36, fontSize: '0.85rem' }}>新</Avatar>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>新消息</Typography>
+                    <Typography variant="caption" color="text.secondary">发送第一条消息给患者</Typography>
+                  </Box>
+                </>
+              )}
             </Box>
 
             {/* Messages */}
             <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              {messages.map(m => {
+              {activeConv ? messages.map(m => {
                 const isMe = m.sender_role === 'doctor';
                 return (
                   <Box key={m.id} sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', flexDirection: isMe ? 'row-reverse' : 'row' }}
@@ -330,7 +383,11 @@ export default function DoctorMessages() {
                     </Box>
                   </Box>
                 );
-              })}
+              }) : (
+                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">暂无消息，输入内容发送第一条消息</Typography>
+                </Box>
+              )}
               <div ref={messagesEndRef} />
             </Box>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -132,7 +132,13 @@ export default function FollowUpPage() {
     };
   }, []);
 
+  const processingTasks = useRef(new Set<string>());
+
   const handleToggleTask = async (planId: string, taskId: string) => {
+    const key = `${planId}:${taskId}`;
+    if (processingTasks.current.has(key)) return;
+    processingTasks.current.add(key);
+
     setPlans((prev) =>
       prev.map((plan) => {
         if (plan.id !== planId) return plan;
@@ -145,8 +151,11 @@ export default function FollowUpPage() {
 
     try {
       await ackTask(planId, taskId);
-    } catch {
+    } catch (err) {
+      console.error('完成任务失败:', err);
       // 如果 API 失败，已在本地切换状态，保持演示体验
+    } finally {
+      processingTasks.current.delete(key);
     }
   };
 
@@ -331,6 +340,11 @@ export default function FollowUpPage() {
                       {plan.tasks.map((task) => (
                         <Box
                           key={task.id}
+                          onClick={() => {
+                            if (task.status !== 'completed') {
+                              handleToggleTask(plan.id, task.id);
+                            }
+                          }}
                           sx={{
                             display: 'flex',
                             alignItems: 'center',
@@ -339,17 +353,22 @@ export default function FollowUpPage() {
                             borderRadius: 2,
                             bgcolor: task.status === 'completed' ? 'rgba(102,187,106,0.06)' : 'rgba(20,184,166,0.04)',
                             transition: 'background 0.2s',
+                            cursor: task.status !== 'completed' ? 'pointer' : 'default',
+                            '&:hover': task.status !== 'completed' ? { bgcolor: 'rgba(20,184,166,0.08)' } : {},
                           }}
                         >
                           <Checkbox
                             checked={task.status === 'completed'}
-                            onChange={() => handleToggleTask(plan.id, task.id)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              handleToggleTask(plan.id, task.id);
+                            }}
                             sx={{
                               color: warmPrimary,
                               '&.Mui-checked': { color: '#66BB6A' },
                               p: 0.5,
                             }}
-                            disabled={status === '已过期' || status === '已完成' || task.status !== 'pending'}
+                            disabled={task.status === 'completed'}
                           />
                           <Box sx={{ flex: 1 }}>
                             <Typography

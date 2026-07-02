@@ -139,20 +139,25 @@ async def list_doctor_cases(
         patient_result = await db.execute(patient_stmt)
         patient = patient_result.scalar_one_or_none()
 
-        # Get latest Agent session for summary
-        session_stmt = select(AgentSession).where(
-            AgentSession.user_id == case.patient_id
-        ).order_by(AgentSession.created_at.desc()).limit(1)
-        session_result = await db.execute(session_stmt)
-        latest_session = session_result.scalar_one_or_none()
-
+        # Get the agent session associated with this case
         agent_summary = ""
-        if latest_session and latest_session.structured_output:
-            so = latest_session.structured_output
+        session = None
+        if case.source_session_id:
+            session_stmt = select(AgentSession).where(
+                AgentSession.id == case.source_session_id
+            )
+            session_result = await db.execute(session_stmt)
+            session = session_result.scalar_one_or_none()
+
+        if session and session.structured_output:
+            so = session.structured_output
             if isinstance(so, dict):
                 agent_summary = so.get("primary_diagnosis", "") or so.get("summary", "")
             else:
                 agent_summary = str(so)
+
+        if not agent_summary and case.ai_diagnosis_summary:
+            agent_summary = case.ai_diagnosis_summary
         if not agent_summary:
             agent_summary = case.description[:100] + "..." if case.description else "暂无摘要"
         agent_summary = agent_summary[:80] + "..." if len(agent_summary) > 80 else agent_summary
@@ -406,6 +411,85 @@ async def send_plan_instruction(
             for t in plan.tasks
         ],
         "message": "已根据您的指令创建诊疗计划",
+    }
+
+
+@router.post("/cases/{case_id}/conversation")
+async def get_or_create_conversation(
+    case_id: str,
+    ctx: CurrentUserContext,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Get or create a conversation with the patient for this case."""
+    if not ctx.user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    case = await db.get(MedicalCase, uuid.UUID(case_id))
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    if case.assigned_doctor_id != ctx.user.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this case")
+
+    from app.services.message_service import ensure_conversation
+    conv = await ensure_conversation(
+        db, uuid.UUID(case_id), case.patient_id, ctx.user.id,
+        commit=False,
+    )
+
+    # If doctor previously deleted this conversation, restore it
+    if conv.doctor_deleted_at is not None:
+        conv.doctor_deleted_at = None
+    await db.commit()
+    await db.refresh(conv)
+    return {"conversation_id": str(conv.id)}
+
+
+@router.post("/cases/{case_id}/messages")
+async def send_case_message(
+    case_id: str,
+    body: dict[str, Any],
+    ctx: CurrentUserContext,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Send a message to the patient for this case. Creates conversation if needed."""
+    if not ctx.user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    case = await db.get(MedicalCase, uuid.UUID(case_id))
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if case.assigned_doctor_id != ctx.user.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this case")
+
+    from app.services.message_service import ensure_conversation, send_message
+    from app.models.message import MessageType
+
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="Content is required")
+
+    conv = await ensure_conversation(
+        db, uuid.UUID(case_id), case.patient_id, ctx.user.id,
+        commit=False,
+    )
+
+    msg = await send_message(
+        db, conv.id, ctx.user.id, "doctor",
+        content=content,
+        message_type=MessageType.TEXT,
+    )
+    await db.commit()
+    await db.refresh(conv)
+    await db.refresh(msg)
+
+    return {
+        "id": str(msg.id),
+        "conversation_id": str(conv.id),
+        "sender_role": "doctor",
+        "message_type": msg.message_type.value,
+        "content": msg.content,
+        "created_at": (msg.created_at.isoformat() if msg.created_at else "") + ("Z" if msg.created_at and msg.created_at.tzinfo is None else ""),
     }
 
 

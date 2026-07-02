@@ -181,7 +181,7 @@ async def complete_task(
         .where(
             CareTask.id == task_id,
             CareTask.plan_id == plan_id,
-            CareTask.status == TaskStatusEnum.PENDING,
+            CareTask.status.in_([TaskStatusEnum.PENDING, TaskStatusEnum.EXPIRED]),
         )
         .values(status=TaskStatusEnum.COMPLETED, completed_at=now)
     )

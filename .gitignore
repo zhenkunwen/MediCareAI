@@ -71,3 +71,9 @@ npm-debug.log*
 # Build artifacts
 frontend/dist/
 frontend/build/
+
+# Uploads (test/dev artifacts)
+uploads/
+
+# Learning guide (commit separately)
+docs/零基础学习指南.md
